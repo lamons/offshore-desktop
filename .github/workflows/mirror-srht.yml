@@ -1,0 +1,39 @@
+name: Mirror to SourceHut
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-srht
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH key for git.sr.ht
+        env:
+          SRHT_SSH_KEY: ${{ secrets.SRHT_SSH_KEY }}
+        run: |
+          if [[ -z "$SRHT_SSH_KEY" ]]; then
+            echo "Error: SRHT_SSH_KEY secret is not set in GitHub repository settings." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SRHT_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519,rsa git.sr.ht >> ~/.ssh/known_hosts
+
+      - name: Mirror branches and tags to git.sr.ht
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone --bare "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" mirror.git
+          cd mirror.git
+          git push --prune git@git.sr.ht:~lamons/offshore-desktop \
+            "+refs/heads/*:refs/heads/*" \
+            "+refs/tags/*:refs/tags/*"
