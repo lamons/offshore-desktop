@@ -1,0 +1,4 @@
+# Core backend package bundled into the Nuitka sidecar during CI builds.
+# Switch to a pinned PyPI release (e.g. offshore-podcast==1.0.0) once published.
+git+https://git.sr.ht/~lamons/offshore@1.0.0
+nuitka>=4.0

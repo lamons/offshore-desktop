@@ -1,0 +1,139 @@
+name: Build Desktop Installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      offshore_spec:
+        description: "Optional pip spec for offshore-podcast (e.g. offshore-podcast==1.0.0 or git+https://git.sr.ht/~lamons/offshore@main)"
+        required: false
+        default: ""
+      create_release:
+        description: "Create a draft GitHub Release with the built installers"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target_label: macos-arm64
+          - platform: windows-latest
+            target_label: windows-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout offshore-desktop
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python build dependencies & offshore-podcast
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            VENV_PY=".venv/Scripts/python.exe"
+          else
+            VENV_PY=".venv/bin/python"
+          fi
+          "$VENV_PY" -m pip install --upgrade pip
+          "$VENV_PY" -m pip install -r sidecar/requirements.txt
+          if [[ -n "${{ inputs.offshore_spec }}" ]]; then
+            "$VENV_PY" -m pip install --upgrade --force-reinstall --no-deps "${{ inputs.offshore_spec }}"
+          fi
+          ABS_VENV_PY=$(python -c "import os, sys; print(os.path.abspath(sys.argv[1]))" "$VENV_PY")
+          echo "PYTHON_BIN=$ABS_VENV_PY" >> "$GITHUB_ENV"
+
+      - name: Build Nuitka sidecar (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./scripts/build_sidecar.sh
+
+      - name: Build Nuitka sidecar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\build_sidecar.ps1
+
+      - name: Smoke-test Nuitka sidecar
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            SIDECAR="src-tauri/resources/sidecar/offshore-sidecar.exe"
+          else
+            SIDECAR="src-tauri/resources/sidecar/offshore-sidecar"
+          fi
+          "$PYTHON_BIN" -c '
+          import os, subprocess, sys, tempfile, urllib.request
+          exe = sys.argv[1]
+          with tempfile.TemporaryDirectory() as td:
+              proc = subprocess.Popen(
+                  [exe, "serve", "--host", "127.0.0.1", "--ephemeral-port", "--ready-line", "--exit-on-stdin-eof", "--log-level", "warning"],
+                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                  text=True, env={**os.environ, "OFFSHORE_SHOWS_DIR": td, "PYTHONUNBUFFERED": "1"},
+              )
+              url = None
+              for _ in range(50):
+                  line = proc.stdout.readline()
+                  if not line:
+                      break
+                  if line.startswith("OFFSHORE_READY "):
+                      url = line.split(" ", 1)[1].strip()
+                      break
+              assert url, f"No OFFSHORE_READY; stderr={proc.stderr.read()}"
+              with urllib.request.urlopen(url, timeout=10) as r:
+                  assert r.status == 200
+                  assert "/static/htmx.min.js" in r.read().decode()
+              proc.stdin.close()
+              assert proc.wait(timeout=15) == 0
+              print("Sidecar smoke test passed:", url)
+          ' "$SIDECAR"
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build Tauri installers (and upload to draft release on tags)
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.create_release == true
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.run_number) }}
+          releaseName: "Offshore ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.run_number) }}"
+          releaseBody: "Desktop installers for macOS and Windows."
+          releaseDraft: true
+          prerelease: false
+
+      - name: Build Tauri installers (artifact-only run)
+        if: ${{ !(startsWith(github.ref, 'refs/tags/v') || inputs.create_release == true) }}
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: offshore-desktop-${{ matrix.target_label }}
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

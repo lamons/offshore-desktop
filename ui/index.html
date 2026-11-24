@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offshore</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --fg: #18181b;
+      --muted: #71717a;
+      --accent: #faaf40;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111315;
+        --fg: #f4f4f5;
+        --muted: #a1a1aa;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      user-select: none;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 3px solid color-mix(in srgb, var(--muted) 28%, transparent);
+      border-top-color: var(--accent);
+      animation: spin 0.8s linear infinite;
+    }
+    .label {
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .error {
+      display: none;
+      max-width: 460px;
+      margin-top: 8px;
+      padding: 12px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #ef4444;
+      background: color-mix(in srgb, #ef4444 10%, transparent);
+      border: 1px solid color-mix(in srgb, #ef4444 30%, transparent);
+      white-space: pre-wrap;
+      user-select: text;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="spinner" id="spinner"></div>
+  <div class="label" id="status">Starting Offshore…</div>
+  <div class="error" id="error"></div>
+  <script>
+    window.__offshoreStartupError = function (msg) {
+      document.getElementById('spinner').style.display = 'none';
+      document.getElementById('status').textContent = 'Offshore could not start';
+      const el = document.getElementById('error');
+      el.textContent = msg;
+      el.style.display = 'block';
+    };
+  </script>
+</body>
+</html>
